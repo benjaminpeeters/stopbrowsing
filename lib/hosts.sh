@@ -185,6 +185,67 @@ is_doh_blocking_enabled() {
     fi
 }
 
+# Setup DNS over TLS (DoT) blocking - simple and safe
+setup_dot_blocking() {
+    echo "Setting up DoT blocking (port 853)..."
+    
+    if ! command -v iptables >/dev/null 2>&1; then
+        echo "⚠️  WARNING: iptables not available for DoT blocking"
+        return 1
+    fi
+    
+    # Create or flush DoT blocking chain
+    sudo iptables -N STOPBROWSING_DOT 2>/dev/null || sudo iptables -F STOPBROWSING_DOT 2>/dev/null || {
+        echo "⚠️  WARNING: Could not setup iptables chain for DoT blocking"
+        return 1
+    }
+    
+    # Add chain to OUTPUT if not already present
+    if ! sudo iptables -C OUTPUT -j STOPBROWSING_DOT 2>/dev/null; then
+        sudo iptables -I OUTPUT -j STOPBROWSING_DOT 2>/dev/null || {
+            echo "⚠️  WARNING: Could not add DoT chain to OUTPUT"
+            return 1
+        }
+    fi
+    
+    # Block all DNS over TLS traffic (port 853)
+    sudo iptables -A STOPBROWSING_DOT -p tcp --dport 853 -j DROP 2>/dev/null || {
+        echo "⚠️  WARNING: Could not add DoT TCP blocking rule"
+        return 1
+    }
+    
+    sudo iptables -A STOPBROWSING_DOT -p udp --dport 853 -j DROP 2>/dev/null || {
+        echo "⚠️  WARNING: Could not add DoT UDP blocking rule"
+        return 1
+    }
+    
+    echo "✅ DoT blocking enabled (port 853 blocked)"
+    return 0
+}
+
+# Remove DoT blocking rules
+remove_dot_blocking() {
+    echo "Removing DoT blocking rules..."
+    
+    if command -v iptables >/dev/null 2>&1; then
+        sudo iptables -D OUTPUT -j STOPBROWSING_DOT 2>/dev/null || true
+        sudo iptables -F STOPBROWSING_DOT 2>/dev/null || true
+        sudo iptables -X STOPBROWSING_DOT 2>/dev/null || true
+        echo "✅ DoT blocking rules removed"
+    fi
+    
+    return 0
+}
+
+# Check if DoT blocking is enabled
+is_dot_blocking_enabled() {
+    if command -v iptables >/dev/null 2>&1; then
+        sudo iptables -L STOPBROWSING_DOT -n 2>/dev/null | grep -q "dpt:853" 2>/dev/null
+    else
+        return 1
+    fi
+}
+
 # Block websites using hosts file with improved reliability
 block_websites() {
     local temp_file=$(mktemp)
@@ -245,10 +306,18 @@ block_websites() {
     # Terminate existing connections to blocked websites
     terminate_existing_connections "${filtered_websites[@]}"
     
-    # Setup DoH blocking to prevent DNS bypass (if enabled)
+    # Setup DoH/DoT blocking to prevent DNS bypass (if enabled)
     local doh_enabled=$(config_get_doh_blocking_enabled)
     local doh_success=false
+    local dot_success=false
+    
     if [[ "$doh_enabled" == "true" ]]; then
+        # Setup DoT blocking (simple and safe)
+        if setup_dot_blocking; then
+            dot_success=true
+        fi
+        
+        # Setup DoH blocking (string matching approach)
         if setup_doh_blocking "${filtered_websites[@]}"; then
             doh_success=true
         fi
@@ -263,8 +332,14 @@ block_websites() {
         echo "Blocked ${blocked_count} websites"
     fi
     
-    # Report DoH blocking status
+    # Report DoH/DoT blocking status
     if [[ "$doh_enabled" == "true" ]]; then
+        if [[ "$dot_success" == "true" ]]; then
+            echo "✅ DoT blocking enabled (DNS over TLS blocked on port 853)"
+        else
+            echo "⚠️  DoT blocking failed - devices may use DNS-over-TLS"
+        fi
+        
         if [[ "$doh_success" == "true" ]]; then
             echo "✅ DoH blocking enabled (prevents browser DNS bypass)"
         else
@@ -301,8 +376,9 @@ remove_block() {
             # Aggressively flush DNS caches
             flush_all_dns_caches
             
-            # Remove DoH blocking rules
+            # Remove DoH and DoT blocking rules
             remove_doh_blocking
+            remove_dot_blocking
             
             return 0
         else
@@ -463,12 +539,17 @@ cmd_status() {
         echo "Currently blocked websites:"
         get_blocked_websites | sed 's/^/  - /'
         
-        # Show DoH blocking status
+        # Show DoH/DoT blocking status
+        echo ""
+        if is_dot_blocking_enabled; then
+            echo "DoT blocking: ENABLED (DNS over TLS blocked on port 853)"
+        else
+            echo "DoT blocking: DISABLED (devices may use DNS-over-TLS)"
+        fi
+        
         if is_doh_blocking_enabled; then
-            echo ""
             echo "DoH blocking: ENABLED (prevents DNS bypass)"
         else
-            echo ""
             echo "DoH blocking: DISABLED (browsers may bypass blocking)"
         fi
         
@@ -482,9 +563,13 @@ cmd_status() {
         echo "Status: NOT BLOCKED"
         echo "No websites are currently blocked"
         
-        # Show DoH blocking status even when not blocking
+        # Show DoH/DoT blocking status even when not blocking
+        echo ""
+        if is_dot_blocking_enabled; then
+            echo "DoT blocking: ENABLED (leftover rules - run --unblock to clean)"
+        fi
+        
         if is_doh_blocking_enabled; then
-            echo ""
             echo "DoH blocking: ENABLED (leftover rules - run --unblock to clean)"
         fi
     fi
