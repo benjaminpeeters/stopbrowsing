@@ -1,0 +1,94 @@
+# Default website blocklist profile
+
+websites:
+  # Social media platforms
+  - facebook.com
+  - www.facebook.com
+  - m.facebook.com
+  - twitter.com
+  - www.twitter.com
+  - x.com
+  - www.x.com
+  - instagram.com
+  - www.instagram.com
+  - tiktok.com
+  - www.tiktok.com
+  - snapchat.com
+  - www.snapchat.com
+  - linkedin.com
+  - www.linkedin.com
+  
+  # Video and entertainment platforms
+  - youtube.com
+  - www.youtube.com
+  - m.youtube.com
+  - youtu.be
+  - www.youtu.be
+  - netflix.com
+  - www.netflix.com
+  - hulu.com
+  - www.hulu.com
+  - twitch.tv
+  - www.twitch.tv
+  - disneyplus.com
+  - www.disneyplus.com
+  
+  # News and discussion sites
+  - reddit.com
+  - www.reddit.com
+  - old.reddit.com
+  - news.ycombinator.com
+  - slashdot.org
+  - www.slashdot.org
+  
+  # Gaming platforms
+  - steampowered.com
+  - store.steampowered.com
+  - epicgames.com
+  - www.epicgames.com
+  
+  # Shopping sites (optional)
+  # - amazon.com
+  # - www.amazon.com
+  # - ebay.com
+  # - www.ebay.com
+
+# Exceptions (whitelist specific URLs even when domain is blocked)
+exceptions:
+  # Allow specific YouTube videos for educational content
+  # - "!youtube.com/watch?v=deWLX8K_7Oo"           # Specific video
+  # - "!youtube.com/channel/UC*"                   # All channels (wildcard)
+  # - "!*.youtube.com/playlist*"                   # All playlists
+  
+  # Allow specific Reddit communities
+  # - "!reddit.com/r/programming"                  # Programming subreddit
+  # - "!reddit.com/r/webdev"                       # Web development subreddit
+  
+  # Allow specific social media pages
+  # - "!twitter.com/username"                      # Specific Twitter account
+  # - "!facebook.com/pages/*"                      # All Facebook pages
+
+# ============================================================================
+# Exception Guide:
+# ============================================================================
+# 
+# SYNTAX:
+# - Start with "!" to mark as exception
+# - Use exact URLs: "!youtube.com/watch?v=specific_video_id"
+# - Use wildcards: "!youtube.com/channel/*" or "!*.youtube.com/user/*"
+# - Path matching: "!reddit.com/r/programming*"
+# 
+# EXAMPLES:
+# - "!youtube.com/watch?v=deWLX8K_7Oo"    # Allow specific video
+# - "!youtube.com/channel/UC*"            # Allow all YouTube channels
+# - "!youtube.com/playlist*"              # Allow all playlists
+# - "!reddit.com/r/programming"           # Allow programming subreddit
+# - "!twitter.com/elonmusk"               # Allow specific Twitter account
+# - "!*.facebook.com/marketplace"         # Allow Facebook marketplace
+# 
+# NOTES:
+# - Exceptions override website blocking for specific URLs
+# - Wildcards (*) match any characters
+# - Case-sensitive matching
+# - Remove the "# " to enable exceptions
+# ============================================================================

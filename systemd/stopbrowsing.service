@@ -1,0 +1,16 @@
+[Unit]
+Description=StopBrowsing Website Blocker
+After=network.target
+Documentation=file:///usr/local/share/doc/stopbrowsing/README.md
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/stopbrowsing block -q
+ExecStop=/usr/local/bin/stopbrowsing unblock -q
+RemainAfterExit=yes
+User=%i
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

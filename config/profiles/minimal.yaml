@@ -1,0 +1,28 @@
+# Minimal website blocklist profile
+# Only blocks the most distracting sites
+
+websites:
+  # Major social media platforms
+  - facebook.com
+  - www.facebook.com
+  - twitter.com
+  - www.twitter.com
+  - x.com
+  - www.x.com
+  - instagram.com
+  - www.instagram.com
+  - tiktok.com
+  - www.tiktok.com
+  
+  # Major video platforms
+  - youtube.com
+  - www.youtube.com
+  - youtu.be
+  - www.youtu.be
+  - netflix.com
+  - www.netflix.com
+  
+  # Major discussion sites
+  - reddit.com
+  - www.reddit.com
+  - old.reddit.com

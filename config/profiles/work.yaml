@@ -1,0 +1,65 @@
+# Work-focused website blocklist profile
+
+websites:
+  # Social media - strict blocking during work
+  - facebook.com
+  - www.facebook.com
+  - m.facebook.com
+  - twitter.com
+  - www.twitter.com
+  - x.com
+  - www.x.com
+  - instagram.com
+  - www.instagram.com
+  - tiktok.com
+  - www.tiktok.com
+  - snapchat.com
+  - www.snapchat.com
+  
+  # Video platforms - major time wasters
+  - youtube.com
+  - www.youtube.com
+  - m.youtube.com
+  - youtu.be
+  - www.youtu.be
+  - netflix.com
+  - www.netflix.com
+  - hulu.com
+  - www.hulu.com
+  - twitch.tv
+  - www.twitch.tv
+  - disneyplus.com
+  - www.disneyplus.com
+  - vimeo.com
+  - www.vimeo.com
+  
+  # News and discussion - can be distracting
+  - reddit.com
+  - www.reddit.com
+  - old.reddit.com
+  - hackernews.com
+  - news.ycombinator.com
+  
+  # Gaming platforms
+  - steampowered.com
+  - store.steampowered.com
+  - epicgames.com
+  - www.epicgames.com
+  - battle.net
+  - us.battle.net
+  
+  # Shopping sites during work hours
+  - amazon.com
+  - www.amazon.com
+  - ebay.com
+  - www.ebay.com
+  - etsy.com
+  - www.etsy.com
+  
+  # Sports and entertainment news
+  - espn.com
+  - www.espn.com
+  - cnn.com
+  - www.cnn.com
+  - bbc.com
+  - www.bbc.com

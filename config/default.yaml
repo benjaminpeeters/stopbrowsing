@@ -1,0 +1,26 @@
+# StopBrowsing Configuration File
+# Website blocker for productivity
+
+# Global settings
+enabled: true                        # Enable/disable website blocking
+profile: default                     # Website profile to use (default, work, minimal)
+
+# Auto-blocking settings
+auto_block:
+  on_startup: true                    # Automatically block on system startup
+  on_login: true                      # Block when user logs in
+  
+# Statistics tracking
+statistics:
+  start_date: ""                      # Format: "2025-06-28" - Set when you start tracking
+  track_success: true                 # Enable/disable success day tracking
+
+# DNS-over-HTTPS blocking (prevents browser bypass)
+doh_blocking:
+  enabled: true                       # Block DoH requests for blocked websites only
+
+# ============================================================================
+# Website Lists: Use 'stopbrowsing -e' to edit blocked websites
+# Statistics: View with 'stopbrowsing --status' 
+# Reset Everything: Use 'stopbrowsing --reset' to start fresh
+# ============================================================================

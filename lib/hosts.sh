@@ -1,0 +1,578 @@
+#!/bin/bash
+
+# Reliable hosts file management for stopbrowsing
+# Copyright (C) 2025 Benjamin Peeters
+# Licensed under AGPL-3.0
+
+HOSTS_FILE="/etc/hosts"
+BLOCK_START="# BEGIN STOPBROWSING BLOCK"
+BLOCK_END="# END STOPBROWSING BLOCK"
+BACKUP_DIR="$HOME/.local/share/stopbrowsing/backups"
+
+# Check if websites are currently blocked
+is_blocked() {
+    grep -q "$BLOCK_START" "$HOSTS_FILE" 2>/dev/null
+}
+
+# Get list of currently blocked websites
+get_blocked_websites() {
+    if is_blocked; then
+        sed -n "/$BLOCK_START/,/$BLOCK_END/p" "$HOSTS_FILE" | \
+        grep -E "^(127\.0\.0\.1|::1)" | \
+        awk '{print $2}' | \
+        sort -u
+    fi
+}
+
+# Check if URL matches exception patterns
+url_matches_exception() {
+    local url="$1"
+    local exception="$2"
+    
+    # Convert glob pattern to regex
+    local pattern
+    pattern=$(echo "$exception" | sed 's/\*/\.\*/g' | sed 's/\?/\./g')
+    
+    # Check if URL matches pattern
+    if [[ "$url" =~ $pattern ]]; then
+        return 0  # Match found
+    fi
+    
+    return 1  # No match
+}
+
+# Check if domain should be blocked (considering exceptions)
+should_block_domain() {
+    local domain="$1"
+    local profile="${2:-$(config_get_profile)}"
+    
+    # Get exceptions for this profile
+    local exceptions=$(config_get_exceptions "$profile")
+    
+    # If no exceptions, block the domain
+    if [[ -z "$exceptions" ]]; then
+        return 0  # Should block
+    fi
+    
+    # Check if domain matches any exception
+    while IFS= read -r exception; do
+        [[ -z "$exception" ]] && continue
+        
+        # Extract domain from exception pattern
+        local exception_domain="${exception%%/*}"
+        exception_domain="${exception_domain%%\?*}"
+        exception_domain="${exception_domain%%:*}"
+        
+        # Check if it's a domain-wide exception
+        if [[ "$exception" == "$domain" ]] || [[ "$exception" == "$domain/*" ]] || [[ "$exception" == "*.$domain" ]]; then
+            return 1  # Should not block (exception found)
+        fi
+    done <<< "$exceptions"
+    
+    return 0  # Should block
+}
+
+# Terminate existing connections to blocked domains (gentle approach)
+terminate_existing_connections() {
+    local domains=("$@")
+    
+    if [[ ${#domains[@]} -eq 0 ]]; then
+        return 0
+    fi
+    
+    echo "Terminating existing connections to blocked websites..."
+    
+    # Simply kill existing connections to blocked domains
+    for domain in "${domains[@]}"; do
+        sudo ss -K dst "$domain" >/dev/null 2>&1 || true
+    done
+    
+    # Wait a moment for connections to close
+    sleep 1
+    
+    echo "Connection termination complete"
+}
+
+# Aggressively flush DNS caches
+flush_all_dns_caches() {
+    echo "Flushing all DNS caches..."
+    
+    # Restart systemd-resolved (most effective)
+    if systemctl is-active systemd-resolved >/dev/null 2>&1; then
+        sudo systemctl restart systemd-resolved
+    fi
+    
+    # Flush resolvectl cache
+    if command -v resolvectl >/dev/null 2>&1; then
+        sudo resolvectl flush-caches 2>/dev/null || true
+    fi
+    
+    # Flush systemd-resolve cache (older systems)
+    if command -v systemd-resolve >/dev/null 2>&1; then
+        sudo systemd-resolve --flush-caches 2>/dev/null || true
+    fi
+}
+
+# Setup DoH blocking for specific domains to prevent DNS bypass
+setup_doh_blocking() {
+    local domains=("$@")
+    
+    if [[ ${#domains[@]} -eq 0 ]]; then
+        return 0
+    fi
+    
+    echo "Setting up DoH blocking for ${#domains[@]} domains..."
+    
+    # Use iptables for reliable string matching (works better than nftables for this)
+    if command -v iptables >/dev/null 2>&1; then
+        # Create or flush custom iptables chain
+        sudo iptables -N STOPBROWSING_DOH 2>/dev/null || sudo iptables -F STOPBROWSING_DOH 2>/dev/null || {
+            echo "⚠️  WARNING: Could not setup iptables for DoH blocking"
+            return 1
+        }
+        
+        # Add chain to OUTPUT if not already present
+        if ! sudo iptables -C OUTPUT -j STOPBROWSING_DOH 2>/dev/null; then
+            sudo iptables -I OUTPUT -j STOPBROWSING_DOH 2>/dev/null || {
+                echo "⚠️  WARNING: Could not add iptables chain to OUTPUT"
+                return 1
+            }
+        fi
+        
+        # Block traffic containing blocked domains using string matching
+        echo "Adding iptables string matching rules..."
+        for domain in "${domains[@]}"; do
+            echo "Adding rule for $domain"
+            sudo iptables -A STOPBROWSING_DOH -p tcp --dport 443 -m string --string "$domain" --algo bm -j DROP 2>/dev/null || true
+            sudo iptables -A STOPBROWSING_DOH -p tcp --dport 80 -m string --string "$domain" --algo bm -j DROP 2>/dev/null || true
+        done
+        
+        echo "✅ DoH blocking enabled for ${#domains[@]} domains (iptables)"
+        return 0
+    else
+        echo "⚠️  WARNING: No firewall tool available for DoH blocking"
+        return 1
+    fi
+}
+
+# Remove DoH blocking rules
+remove_doh_blocking() {
+    echo "Removing DoH blocking rules..."
+    
+    # Remove iptables rules
+    if command -v iptables >/dev/null 2>&1; then
+        sudo iptables -D OUTPUT -j STOPBROWSING_DOH 2>/dev/null || true
+        sudo iptables -F STOPBROWSING_DOH 2>/dev/null || true
+        sudo iptables -X STOPBROWSING_DOH 2>/dev/null || true
+        echo "✅ DoH blocking rules removed (iptables)"
+    fi
+    
+    # Remove nftables table if it exists
+    if command -v nft >/dev/null 2>&1; then
+        sudo nft delete table inet stopbrowsing 2>/dev/null || true
+    fi
+    
+    return 0
+}
+
+# Check if DoH blocking is enabled
+is_doh_blocking_enabled() {
+    # Check for iptables first
+    if command -v iptables >/dev/null 2>&1; then
+        sudo iptables -L STOPBROWSING_DOH -n 2>/dev/null | grep -q "DROP" 2>/dev/null
+    else
+        return 1
+    fi
+}
+
+# Block websites using hosts file with improved reliability
+block_websites() {
+    local temp_file=$(mktemp)
+    
+    # Always remove existing blocks first for clean state
+    if is_blocked; then
+        echo "Updating website blocks..."
+        remove_block_silent
+    else
+        echo "Adding website blocks..."
+    fi
+    
+    # Filter websites based on exceptions
+    local filtered_websites=()
+    for website in "${WEBSITES[@]}"; do
+        if should_block_domain "$website" "$CURRENT_PROFILE"; then
+            filtered_websites+=("$website")
+        fi
+    done
+    
+    # Create hosts block section
+    {
+        echo "$BLOCK_START"
+        echo "# Blocked on $(date)"
+        echo "# Profile: $CURRENT_PROFILE"
+        
+        # Add filtered websites to hosts file
+        for website in "${filtered_websites[@]}"; do
+            echo "127.0.0.1 $website"
+            echo "::1 $website"
+        done
+        
+        echo "$BLOCK_END"
+    } > "$temp_file"
+    
+    # Update hosts file atomically
+    local backup_file="$BACKUP_DIR/hosts.$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$BACKUP_DIR"
+    
+    echo "Updating hosts file..."
+    
+    # Update hosts file (simplified approach)
+    sudo cp "$HOSTS_FILE" "$backup_file" 2>/dev/null || echo "Warning: Could not backup hosts file"
+    
+    # Update hosts file and check if it actually worked
+    sudo bash -c "cat '$temp_file' >> '$HOSTS_FILE'" 2>/dev/null
+    
+    # Verify the update worked by checking if our marker exists
+    if ! grep -q "$BLOCK_START" "$HOSTS_FILE" 2>/dev/null; then
+        echo "Error: Failed to update hosts file"
+        rm -f "$temp_file"
+        return 1
+    fi
+    
+    # Aggressively flush DNS caches
+    flush_all_dns_caches
+    
+    # Terminate existing connections to blocked websites
+    terminate_existing_connections "${filtered_websites[@]}"
+    
+    # Setup DoH blocking to prevent DNS bypass (if enabled)
+    local doh_enabled=$(config_get_doh_blocking_enabled)
+    local doh_success=false
+    if [[ "$doh_enabled" == "true" ]]; then
+        if setup_doh_blocking "${filtered_websites[@]}"; then
+            doh_success=true
+        fi
+    fi
+    
+    local blocked_count=${#filtered_websites[@]}
+    local exception_count=$((${#WEBSITES[@]} - blocked_count))
+    
+    if [[ $exception_count -gt 0 ]]; then
+        echo "Blocked ${blocked_count} websites with ${exception_count} exceptions"
+    else
+        echo "Blocked ${blocked_count} websites"
+    fi
+    
+    # Report DoH blocking status
+    if [[ "$doh_enabled" == "true" ]]; then
+        if [[ "$doh_success" == "true" ]]; then
+            echo "✅ DoH blocking enabled (prevents browser DNS bypass)"
+        else
+            echo "⚠️  DoH blocking failed - browsers may bypass using DNS-over-HTTPS"
+        fi
+    fi
+    
+    rm -f "$temp_file"
+    
+    # Validate blocking worked
+    echo "Validating blocking..."
+    validate_blocking "${filtered_websites[0]:-}"
+    
+    return 0
+}
+
+# Remove block section silently (for internal use)
+remove_block_silent() {
+    if is_blocked; then
+        local backup_file="$BACKUP_DIR/hosts.$(date +%Y%m%d_%H%M%S)"
+        mkdir -p "$BACKUP_DIR"
+        sudo bash -c "cp '$HOSTS_FILE' '$backup_file' && sed -i '/$BLOCK_START/,/$BLOCK_END/d' '$HOSTS_FILE'" 2>/dev/null
+    fi
+}
+
+# Remove block section
+remove_block() {
+    if is_blocked; then
+        local backup_file="$BACKUP_DIR/hosts.$(date +%Y%m%d_%H%M%S)"
+        mkdir -p "$BACKUP_DIR"
+        
+        echo "Removing website blocks..."
+        if sudo bash -c "cp '$HOSTS_FILE' '$backup_file' && sed -i '/$BLOCK_START/,/$BLOCK_END/d' '$HOSTS_FILE'"; then
+            # Aggressively flush DNS caches
+            flush_all_dns_caches
+            
+            # Remove DoH blocking rules
+            remove_doh_blocking
+            
+            return 0
+        else
+            echo "Error: Failed to update hosts file"
+            return 1
+        fi
+    else
+        echo "No blocks found to remove"
+        return 1
+    fi
+}
+
+# Validate that blocking actually works
+validate_blocking() {
+    local test_domain="$1"
+    
+    if [[ -z "$test_domain" ]]; then
+        return 0
+    fi
+    
+    # Test DNS resolution
+    local resolved_ip=$(host "$test_domain" 2>/dev/null | grep "has address" | head -1 | awk '{print $4}')
+    
+    if [[ "$resolved_ip" == "127.0.0.1" ]]; then
+        echo "✓ DNS blocking verified for $test_domain"
+        return 0
+    else
+        echo "⚠ Warning: $test_domain may not be fully blocked (resolves to: $resolved_ip)"
+        echo "  Try closing and reopening your browser"
+        return 1
+    fi
+}
+
+# Unblock websites
+unblock_websites() {
+    if ! is_blocked; then
+        echo "No websites are currently blocked."
+        return 1
+    fi
+    
+    # Remove blocks
+    if remove_block; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Cleanup old backups (called after operations)
+cleanup_old_backups() {
+    # Keep only last 10 backups
+    ls -t "$BACKUP_DIR"/hosts.* 2>/dev/null | tail -n +11 | xargs -r rm 2>/dev/null || true
+}
+
+# Restore hosts file from backup
+restore_hosts() {
+    local latest_backup=$(ls -t "$BACKUP_DIR"/hosts.* 2>/dev/null | head -1)
+    
+    if [[ -z "$latest_backup" ]]; then
+        echo "No backup found to restore"
+        return 1
+    fi
+    
+    echo "Restoring from: $latest_backup"
+    if sudo cp "$latest_backup" "$HOSTS_FILE"; then
+        flush_all_dns_caches
+        echo "Hosts file restored successfully"
+        return 0
+    else
+        echo "Error: Failed to restore hosts file"
+        return 1
+    fi
+}
+
+# Log action to /tmp/stopbrowsing/
+log_action() {
+    local action="$1"
+    local details="$2"
+    
+    mkdir -p "/tmp/stopbrowsing"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [$$] $action: $details" >> "/tmp/stopbrowsing/activity.log"
+}
+
+# Command: block
+cmd_block() {
+    local duration=""
+    
+    # Parse options
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -p|--profile)
+                CURRENT_PROFILE="$2"
+                load_profile "$CURRENT_PROFILE"
+                shift 2
+                ;;
+            -t|--time)
+                duration="$2"
+                shift 2
+                ;;
+            -q|--quiet)
+                QUIET_MODE=true
+                shift
+                ;;
+            *)
+                echo "Unknown option: $1"
+                return 1
+                ;;
+        esac
+    done
+    
+    # Block websites
+    if block_websites; then        
+        log_action "BLOCK" "Blocked ${#WEBSITES[@]} websites in profile $CURRENT_PROFILE"
+        
+        # Schedule unblock if duration specified
+        if [[ -n "$duration" ]]; then
+            schedule_unblock "$duration"
+        fi
+        
+        echo "Successfully blocked ${#WEBSITES[@]} websites"
+    else
+        return 1
+    fi
+}
+
+# Command: unblock  
+cmd_unblock() {
+    # Parse options
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -q|--quiet)
+                QUIET_MODE=true
+                shift
+                ;;
+            *)
+                echo "Unknown option: $1"
+                return 1
+                ;;
+        esac
+    done
+    
+    # Unblock websites
+    if unblock_websites; then
+        log_action "UNBLOCK" "Unblocked all websites"
+        cancel_scheduled_unblock
+        
+        echo "Successfully unblocked all websites"
+    else
+        return 1
+    fi
+}
+
+# Command: status
+cmd_status() {
+    if is_blocked; then
+        echo "Status: BLOCKED"
+        echo ""
+        echo "Currently blocked websites:"
+        get_blocked_websites | sed 's/^/  - /'
+        
+        # Show DoH blocking status
+        if is_doh_blocking_enabled; then
+            echo ""
+            echo "DoH blocking: ENABLED (prevents DNS bypass)"
+        else
+            echo ""
+            echo "DoH blocking: DISABLED (browsers may bypass blocking)"
+        fi
+        
+        # Check for scheduled unblock
+        if [[ -f "/tmp/stopbrowsing.unblock.at" ]]; then
+            local unblock_time=$(cat "/tmp/stopbrowsing.unblock.at")
+            echo ""
+            echo "Scheduled to unblock at: $unblock_time"
+        fi
+    else
+        echo "Status: NOT BLOCKED"
+        echo "No websites are currently blocked"
+        
+        # Show DoH blocking status even when not blocking
+        if is_doh_blocking_enabled; then
+            echo ""
+            echo "DoH blocking: ENABLED (leftover rules - run --unblock to clean)"
+        fi
+    fi
+}
+
+# Command: list
+cmd_list() {
+    local profile="${1:-$CURRENT_PROFILE}"
+    
+    echo "Websites in profile '$profile':"
+    echo ""
+    
+    # Load profile if different
+    if [[ "$profile" != "$CURRENT_PROFILE" ]]; then
+        load_profile "$profile"
+    fi
+    
+    if [[ ${#WEBSITES[@]} -eq 0 ]]; then
+        echo "  No websites configured in this profile"
+    else
+        printf '  - %s\n' "${WEBSITES[@]}"
+        echo ""
+        echo "Total: ${#WEBSITES[@]} websites"
+    fi
+}
+
+# Command: add
+cmd_add() {
+    local website="$1"
+    local profile="${2:-$CURRENT_PROFILE}"
+    
+    if [[ -z "$website" ]]; then
+        echo "Error: Website not specified"
+        echo "Usage: $(basename "$0") add <website> [profile]"
+        return 1
+    fi
+    
+    # Clean up website URL
+    website="${website#http://}"
+    website="${website#https://}"
+    website="${website#www.}"
+    website="${website%%/*}"
+    
+    if add_website_to_profile "$website" "$profile"; then
+        echo "Added '$website' to profile '$profile'"
+        
+        # Reload profile if it's current
+        if [[ "$profile" == "$CURRENT_PROFILE" ]]; then
+            load_profile "$CURRENT_PROFILE"
+        fi
+        
+        # Note: Run 'stopbrowsing --block' to apply changes if currently blocking
+        if is_blocked && [[ "$profile" == "$CURRENT_PROFILE" ]]; then
+            echo "Run 'stopbrowsing --block' to apply changes"
+        fi
+    else
+        echo "Website '$website' already exists in profile '$profile'"
+        return 1
+    fi
+}
+
+# Command: remove
+cmd_remove() {
+    local website="$1"
+    local profile="${2:-$CURRENT_PROFILE}"
+    
+    if [[ -z "$website" ]]; then
+        echo "Error: Website not specified"
+        echo "Usage: $(basename "$0") remove <website> [profile]"
+        return 1
+    fi
+    
+    # Clean up website URL
+    website="${website#http://}"
+    website="${website#https://}"
+    website="${website#www.}"
+    website="${website%%/*}"
+    
+    remove_website_from_profile "$website" "$profile"
+    echo "Removed '$website' from profile '$profile'"
+    
+    # Reload profile if it's current
+    if [[ "$profile" == "$CURRENT_PROFILE" ]]; then
+        load_profile "$CURRENT_PROFILE"
+    fi
+    
+    # Note: Run 'stopbrowsing --block' to apply changes if currently blocking
+    if is_blocked && [[ "$profile" == "$CURRENT_PROFILE" ]]; then
+        echo "Run 'stopbrowsing --block' to apply changes"
+    fi
+}
