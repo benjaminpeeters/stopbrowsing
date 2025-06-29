@@ -7,8 +7,7 @@ profile: default                     # Website profile to use (default, work, mi
 
 # Auto-blocking settings
 auto_block:
-  on_startup: true                    # Automatically block on system startup
-  on_login: true                      # Block when user logs in
+  on_login: true                      # Automatically block when you log in
   
 # Statistics tracking
 statistics:
@@ -35,8 +34,6 @@ tab_closing:
     - "Netflix"                       # Matches "*Netflix*" in window title
     - "Instagram"                     # Matches "*Instagram*" in window title
     - "Facebook"                      # Matches "*Facebook*" in window title
-  delay_between_tabs: 0.5             # Seconds to wait between closing each tab
-  verify_closure: true                # Check if tabs were actually closed
 
 # ============================================================================
 # Website Lists: Use 'stopbrowsing -e' to edit blocked websites

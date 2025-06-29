@@ -41,8 +41,8 @@ usage() {
     echo "    --status, -s        Show current blocking status and statistics"
     echo "    --list, -l          Show currently blocked websites"
     echo "    --edit-sites, -e    Edit website blocklist for current profile"
-    echo "    --auto              Enable auto-blocking on system startup"
-    echo "    --no-auto           Disable auto-blocking on system startup"
+    echo "    --auto              Enable auto-blocking on login"
+    echo "    --no-auto           Disable auto-blocking on login"
     echo "    --reset             Reset all configuration to defaults"
     echo ""
     echo "    --block             Block websites from configuration"
@@ -59,7 +59,7 @@ usage() {
     echo "    stopbrowsing --status       # Check blocking status and stats"
     echo "    stopbrowsing --list         # Show currently blocked websites"
     echo "    stopbrowsing --edit-sites   # Edit website blocklist directly"
-    echo "    stopbrowsing --auto         # Enable auto-blocking on startup"
+    echo "    stopbrowsing --auto         # Enable auto-blocking on login"
     echo "    stopbrowsing --block        # Block websites now"
     echo "    stopbrowsing --add reddit.com # Add website to blocklist"
     echo ""
@@ -95,11 +95,11 @@ show_status() {
     fi
     
     # Show auto-block status
-    if systemctl --user is-enabled stopbrowsing.service >/dev/null 2>&1; then
+    if [[ "$(config_get_auto_block_on_login)" == "true" ]]; then
         echo -e "🚀 Auto-block: ${GREEN}Enabled${NC}"
     else
         echo -e "🚀 Auto-block: ${YELLOW}Disabled${NC}"
-        echo -e "Run ${BOLD}stopbrowsing --auto${NC} to enable auto-blocking on startup"
+        echo -e "Run ${BOLD}stopbrowsing --auto${NC} to enable auto-blocking on login"
     fi
     
     echo ""
@@ -207,6 +207,10 @@ enable_auto_blocking() {
         echo -e "✅ Created default configuration"
     fi
     
+    # Enable auto-blocking in config
+    config_set_auto_block_on_login "true"
+    echo -e "✅ Enabled auto-blocking on login in config"
+    
     # No redirect page needed anymore
     
     # Install systemd user service
@@ -246,7 +250,7 @@ EOF
     echo -e "${BOLD}Next steps:${NC}"
     echo -e "1. Run ${BOLD}stopbrowsing --config${NC} to customize your blocking settings"
     echo -e "2. Run ${BOLD}stopbrowsing --status${NC} to verify everything is working"
-    echo -e "3. Logout and login to test auto-blocking on startup"
+    echo -e "3. Logout and login to test auto-blocking on login"
 }
 
 disable_auto_blocking() {
@@ -260,6 +264,10 @@ disable_auto_blocking() {
     # Remove service file
     rm -f "${HOME}/.config/systemd/user/stopbrowsing.service"
     systemctl --user daemon-reload
+    
+    # Disable auto-blocking in config
+    config_set_auto_block_on_login "false"
+    echo -e "✅ Disabled auto-blocking on login in config"
     
     # Unblock websites
     if is_blocked; then

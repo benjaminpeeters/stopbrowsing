@@ -308,14 +308,32 @@ config_get_tab_closing_websites() {
 }
 
 config_get_tab_closing_delay() {
+    # Hardcoded delay for simplicity
+    echo "0.5"
+}
+
+config_get_auto_block_on_login() {
     if [[ ! -f "${CONFIG_FILE}" ]]; then
-        echo "0.5"  # Default delay
+        echo "true"  # Default to enabled
         return
     fi
     
-    # Extract tab_closing delay_between_tabs value
-    local delay=$(sed -n '/^tab_closing:/,/^[a-zA-Z]/p' "${CONFIG_FILE}" | grep "delay_between_tabs:" | sed 's/.*delay_between_tabs:[[:space:]]*//' | sed 's/#.*//' | tr -d '"' | tr -d "'" | xargs)
-    echo "${delay:-0.5}"
+    # Extract auto_block on_login value
+    local enabled=$(grep -A5 "^auto_block:" "${CONFIG_FILE}" | grep "on_login:" | sed 's/.*on_login:[[:space:]]*//' | sed 's/#.*//' | tr -d '"' | tr -d "'" | xargs)
+    echo "${enabled:-true}"
+}
+
+config_set_auto_block_on_login() {
+    local value="$1"
+    
+    # Ensure config exists
+    if [[ ! -f "${CONFIG_FILE}" ]]; then
+        mkdir -p "${CONFIG_DIR}"
+        cp "${DEFAULT_CONFIG}" "${CONFIG_FILE}"
+    fi
+    
+    # Update on_login value in config file
+    sed -i "s/^[[:space:]]*on_login:[[:space:]]*.*$/  on_login: ${value}/" "${CONFIG_FILE}"
 }
 
 # Global variables for backwards compatibility
