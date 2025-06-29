@@ -4,10 +4,11 @@ A powerful, modular website blocker for Linux that helps boost productivity by b
 
 ## Features
 
-- **Multi-layer DNS blocking** - Three-layer defense against modern bypass techniques
+- **Multi-layer DNS blocking** - Four-layer defense against modern bypass techniques
   - **Layer 1**: System-level blocking using `/etc/hosts` file modification
   - **Layer 2**: DNS-over-TLS (DoT) blocking on port 853
   - **Layer 3**: DNS-over-HTTPS (DoH) string matching on port 443
+  - **Layer 4**: Browser tab closing for existing streaming connections
 - **Modern browser compatibility** - Effective against Chrome, Firefox, Brave, and Edge DoH bypass
 - **Proven effectiveness** - Real-world testing shows 99%+ blocking success rate
 - **Multiple profiles** for different scenarios (work, minimal, custom)
@@ -15,7 +16,7 @@ A powerful, modular website blocker for Linux that helps boost productivity by b
 - **Scheduled blocking** with cron integration
 - **DNS cache flushing** for immediate effect
 - **Desktop notifications** for blocking/unblocking events
-- **Connection termination** for existing connections to blocked sites
+- **Browser tab closing** for existing streaming tabs using gentle automation
 - **Systemd service** support for system-wide blocking
 - **Backup and restore** functionality for hosts file
 - **Exception handling** for allowing specific URLs within blocked domains
@@ -241,10 +242,11 @@ stopbrowsing schedule setup
 
 3. **Browser Caching**: Restart your browser after blocking/unblocking
 
-4. **Existing Connections**: The tool terminates existing connections, but some may persist. Try:
+4. **Existing Streaming Tabs**: The tool automatically closes streaming tabs when blocking is enabled. If tabs persist:
    ```bash
-   # Force close browser and restart
-   pkill -f firefox  # or chrome, etc.
+   # Manually close specific streaming tabs
+   xdotool search --name "Twitch" windowactivate
+   xdotool key ctrl+w
    ```
 
 ### Permissions Issues
@@ -289,6 +291,14 @@ dig @1.1.1.1 -p 853 +tls google.com
 ```bash
 sudo iptables -L STOPBROWSING_DOH -n -v
 # Check packet counters - non-zero means DoH traffic was blocked
+```
+
+**5. Test Layer 4 (Tab Closing)**
+```bash
+# Open a streaming site, then block - tabs should close automatically
+stopbrowsing block
+# Check if xdotool is available
+command -v xdotool
 ```
 
 **5. Advanced Verification**
