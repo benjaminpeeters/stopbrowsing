@@ -241,7 +241,41 @@ config_get_doh_blocking_enabled() {
     fi
     
     # Extract doh_blocking enabled value
-    local enabled=$(grep -A5 "^doh_blocking:" "${CONFIG_FILE}" | grep "enabled:" | sed 's/.*enabled:[[:space:]]*//' | sed 's/#.*//' | tr -d '"' | tr -d "'" | xargs)
+    local enabled=$(grep -A10 "^doh_blocking:" "${CONFIG_FILE}" | grep "enabled:" | sed 's/.*enabled:[[:space:]]*//' | sed 's/#.*//' | tr -d '"' | tr -d "'" | xargs)
+    echo "${enabled:-true}"
+}
+
+# Individual layer control functions
+config_get_hosts_blocking_enabled() {
+    if [[ ! -f "${CONFIG_FILE}" ]]; then
+        echo "true"  # Default to enabled
+        return
+    fi
+    
+    # Extract doh_blocking block_hosts_file value
+    local enabled=$(grep -A10 "^doh_blocking:" "${CONFIG_FILE}" | grep "block_hosts_file:" | sed 's/.*block_hosts_file:[[:space:]]*//' | sed 's/#.*//' | tr -d '"' | tr -d "'" | xargs)
+    echo "${enabled:-true}"
+}
+
+config_get_dot_blocking_enabled() {
+    if [[ ! -f "${CONFIG_FILE}" ]]; then
+        echo "true"  # Default to enabled
+        return
+    fi
+    
+    # Extract doh_blocking block_dot value
+    local enabled=$(grep -A10 "^doh_blocking:" "${CONFIG_FILE}" | grep "block_dot:" | sed 's/.*block_dot:[[:space:]]*//' | sed 's/#.*//' | tr -d '"' | tr -d "'" | xargs)
+    echo "${enabled:-true}"
+}
+
+config_get_doh_string_blocking_enabled() {
+    if [[ ! -f "${CONFIG_FILE}" ]]; then
+        echo "true"  # Default to enabled
+        return
+    fi
+    
+    # Extract doh_blocking block_doh value
+    local enabled=$(grep -A10 "^doh_blocking:" "${CONFIG_FILE}" | grep "block_doh:" | sed 's/.*block_doh:[[:space:]]*//' | sed 's/#.*//' | tr -d '"' | tr -d "'" | xargs)
     echo "${enabled:-true}"
 }
 

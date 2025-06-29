@@ -17,7 +17,12 @@ statistics:
 
 # DNS-over-HTTPS blocking (prevents browser bypass)
 doh_blocking:
-  enabled: true                       # Block DoH requests for blocked websites only
+  enabled: true                       # Master switch - Block DoH requests for blocked websites only
+  
+  # Individual blocking layer controls (advanced users)
+  block_hosts_file: true              # Layer 1: /etc/hosts file modification 
+  block_dot: true                     # Layer 2: DNS over TLS (port 853)
+  block_doh: true                     # Layer 3: DNS over HTTPS string matching
 
 # ============================================================================
 # Website Lists: Use 'stopbrowsing -e' to edit blocked websites

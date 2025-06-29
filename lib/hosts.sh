@@ -281,46 +281,60 @@ block_websites() {
         echo "$BLOCK_END"
     } > "$temp_file"
     
-    # Update hosts file atomically
-    local backup_file="$BACKUP_DIR/hosts.$(date +%Y%m%d_%H%M%S)"
-    mkdir -p "$BACKUP_DIR"
+    # Get individual layer settings
+    local doh_enabled=$(config_get_doh_blocking_enabled)
+    local hosts_enabled=$(config_get_hosts_blocking_enabled)
+    local dot_enabled=$(config_get_dot_blocking_enabled)
+    local doh_string_enabled=$(config_get_doh_string_blocking_enabled)
     
-    echo "Updating hosts file..."
-    
-    # Update hosts file (simplified approach)
-    sudo cp "$HOSTS_FILE" "$backup_file" 2>/dev/null || echo "Warning: Could not backup hosts file"
-    
-    # Update hosts file and check if it actually worked
-    sudo bash -c "cat '$temp_file' >> '$HOSTS_FILE'" 2>/dev/null
-    
-    # Verify the update worked by checking if our marker exists
-    if ! grep -q "$BLOCK_START" "$HOSTS_FILE" 2>/dev/null; then
-        echo "Error: Failed to update hosts file"
-        rm -f "$temp_file"
-        return 1
+    # Layer 1: Update hosts file (if enabled)
+    local hosts_success=false
+    if [[ "$hosts_enabled" == "true" ]]; then
+        local backup_file="$BACKUP_DIR/hosts.$(date +%Y%m%d_%H%M%S)"
+        mkdir -p "$BACKUP_DIR"
+        
+        echo "Updating hosts file..."
+        
+        # Update hosts file (simplified approach)
+        sudo cp "$HOSTS_FILE" "$backup_file" 2>/dev/null || echo "Warning: Could not backup hosts file"
+        
+        # Update hosts file and check if it actually worked
+        sudo bash -c "cat '$temp_file' >> '$HOSTS_FILE'" 2>/dev/null
+        
+        # Verify the update worked by checking if our marker exists
+        if grep -q "$BLOCK_START" "$HOSTS_FILE" 2>/dev/null; then
+            hosts_success=true
+            # Aggressively flush DNS caches
+            flush_all_dns_caches
+            # Terminate existing connections to blocked websites
+            terminate_existing_connections "${filtered_websites[@]}"
+        else
+            echo "Error: Failed to update hosts file"
+        fi
+    else
+        echo "Skipping hosts file update (disabled in config)"
     fi
     
-    # Aggressively flush DNS caches
-    flush_all_dns_caches
-    
-    # Terminate existing connections to blocked websites
-    terminate_existing_connections "${filtered_websites[@]}"
-    
-    # Setup DoH/DoT blocking to prevent DNS bypass (if enabled)
-    local doh_enabled=$(config_get_doh_blocking_enabled)
-    local doh_success=false
+    # Layer 2 & 3: Setup DoH/DoT blocking to prevent DNS bypass (if enabled)
     local dot_success=false
+    local doh_success=false
     
-    if [[ "$doh_enabled" == "true" ]]; then
-        # Setup DoT blocking (simple and safe)
+    # Layer 2: DoT blocking (if master switch and layer enabled)
+    if [[ "$doh_enabled" == "true" && "$dot_enabled" == "true" ]]; then
         if setup_dot_blocking; then
             dot_success=true
         fi
-        
-        # Setup DoH blocking (string matching approach)
+    elif [[ "$dot_enabled" != "true" ]]; then
+        echo "Skipping DoT blocking (disabled in config)"
+    fi
+    
+    # Layer 3: DoH string matching (if master switch and layer enabled)  
+    if [[ "$doh_enabled" == "true" && "$doh_string_enabled" == "true" ]]; then
         if setup_doh_blocking "${filtered_websites[@]}"; then
             doh_success=true
         fi
+    elif [[ "$doh_string_enabled" != "true" ]]; then
+        echo "Skipping DoH string matching (disabled in config)"
     fi
     
     local blocked_count=${#filtered_websites[@]}
@@ -332,21 +346,26 @@ block_websites() {
         echo "Blocked ${blocked_count} websites"
     fi
     
-    # Report DoH/DoT blocking status
-    if [[ "$doh_enabled" == "true" ]]; then
-        if [[ "$dot_success" == "true" ]]; then
-            echo "✅ DoT blocking enabled (DNS over TLS blocked on port 853)"
-        else
-            echo "⚠️  DoT blocking failed - devices may use DNS-over-TLS"
-        fi
-        
-        if [[ "$doh_success" == "true" ]]; then
-            echo "✅ DoH blocking enabled (prevents browser DNS bypass)"
-        else
-            echo "⚠️  DoH blocking failed - browsers may bypass using DNS-over-HTTPS"
-        fi
+    # Report all layer blocking status
+    if [[ "$hosts_success" == "true" ]]; then
+        echo "✅ Layer 1: Hosts file blocking enabled"
+    elif [[ "$hosts_enabled" == "true" ]]; then
+        echo "⚠️  Layer 1: Hosts file blocking failed"
     fi
     
+    if [[ "$dot_success" == "true" ]]; then
+        echo "✅ Layer 2: DoT blocking enabled (DNS over TLS blocked on port 853)"
+    elif [[ "$doh_enabled" == "true" && "$dot_enabled" == "true" ]]; then
+        echo "⚠️  Layer 2: DoT blocking failed - devices may use DNS-over-TLS"
+    fi
+    
+    if [[ "$doh_success" == "true" ]]; then
+        echo "✅ Layer 3: DoH blocking enabled (prevents browser DNS bypass)"
+    elif [[ "$doh_enabled" == "true" && "$doh_string_enabled" == "true" ]]; then
+        echo "⚠️  Layer 3: DoH blocking failed - browsers may bypass using DNS-over-HTTPS"
+    fi
+    
+    # Clean up temp file
     rm -f "$temp_file"
     
     # Validate blocking worked
