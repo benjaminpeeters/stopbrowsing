@@ -5,14 +5,25 @@ websites:
   - facebook.com
   - www.facebook.com
   - m.facebook.com
+  # Facebook CDN domains
+  - fbcdn.net
+  
   - twitter.com
   - www.twitter.com
   - x.com
   - www.x.com
+  
   - instagram.com
   - www.instagram.com
+  # Instagram CDN domains
+  - cdninstagram.com
+  
   - tiktok.com
   - www.tiktok.com
+  # TikTok CDN and video servers
+  - tiktokcdn.com
+  - musical.ly
+  
   - snapchat.com
   - www.snapchat.com
   - linkedin.com
@@ -24,12 +35,22 @@ websites:
   - m.youtube.com
   - youtu.be
   - www.youtu.be
+  # YouTube CDN and video servers
+  - googlevideo.com
+  - youtube-nocookie.com
+  
   - netflix.com
   - www.netflix.com
   - hulu.com
   - www.hulu.com
+  
   - twitch.tv
   - www.twitch.tv
+  # Twitch CDN and streaming infrastructure
+  - ttvnw.net
+  - jtvnw.net
+  - twitchcdn.net
+  
   - disneyplus.com
   - www.disneyplus.com
   

@@ -279,6 +279,45 @@ config_get_doh_string_blocking_enabled() {
     echo "${enabled:-true}"
 }
 
+config_get_tab_closing_enabled() {
+    if [[ ! -f "${CONFIG_FILE}" ]]; then
+        echo "true"  # Default to enabled
+        return
+    fi
+    
+    # Extract doh_blocking block_tab_closing value
+    local enabled=$(grep -A10 "^doh_blocking:" "${CONFIG_FILE}" | grep "block_tab_closing:" | sed 's/.*block_tab_closing:[[:space:]]*//' | sed 's/#.*//' | tr -d '"' | tr -d "'" | xargs)
+    echo "${enabled:-true}"
+}
+
+config_get_tab_closing_websites() {
+    if [[ ! -f "${CONFIG_FILE}" ]]; then
+        # Default websites if config not found
+        echo "Twitch TikTok YouTube youtu.be Netflix Instagram Facebook"
+        return
+    fi
+    
+    # Extract tab_closing websites list
+    sed -n '/^tab_closing:/,/^[a-zA-Z]/p' "${CONFIG_FILE}" | \
+    sed -n '/websites:/,/^[[:space:]]*[a-zA-Z]/p' | \
+    grep "^[[:space:]]*-[[:space:]]" | \
+    sed 's/^[[:space:]]*-[[:space:]]*//' | \
+    sed 's/#.*//' | \
+    tr -d '"' | tr -d "'" | \
+    xargs
+}
+
+config_get_tab_closing_delay() {
+    if [[ ! -f "${CONFIG_FILE}" ]]; then
+        echo "0.5"  # Default delay
+        return
+    fi
+    
+    # Extract tab_closing delay_between_tabs value
+    local delay=$(sed -n '/^tab_closing:/,/^[a-zA-Z]/p' "${CONFIG_FILE}" | grep "delay_between_tabs:" | sed 's/.*delay_between_tabs:[[:space:]]*//' | sed 's/#.*//' | tr -d '"' | tr -d "'" | xargs)
+    echo "${delay:-0.5}"
+}
+
 # Global variables for backwards compatibility
 declare -a WEBSITES
 CURRENT_PROFILE="$(config_get_profile)"

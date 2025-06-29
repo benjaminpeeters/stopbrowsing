@@ -23,6 +23,20 @@ doh_blocking:
   block_hosts_file: true              # Layer 1: /etc/hosts file modification 
   block_dot: true                     # Layer 2: DNS over TLS (port 853)
   block_doh: true                     # Layer 3: DNS over HTTPS string matching
+  block_tab_closing: true             # Layer 4: Close streaming tabs (replaces connection termination)
+
+# Tab closing configuration (Layer 4)
+tab_closing:
+  websites:                           # Browser window titles to close
+    - "Twitch"                        # Matches "*Twitch*" in window title
+    - "TikTok"                        # Matches "*TikTok*" in window title  
+    - "YouTube"                       # Matches "*YouTube*" in window title
+    - "youtu.be"                      # Matches "*youtu.be*" in window title
+    - "Netflix"                       # Matches "*Netflix*" in window title
+    - "Instagram"                     # Matches "*Instagram*" in window title
+    - "Facebook"                      # Matches "*Facebook*" in window title
+  delay_between_tabs: 0.5             # Seconds to wait between closing each tab
+  verify_closure: true                # Check if tabs were actually closed
 
 # ============================================================================
 # Website Lists: Use 'stopbrowsing -e' to edit blocked websites

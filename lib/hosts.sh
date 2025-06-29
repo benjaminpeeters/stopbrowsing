@@ -82,15 +82,67 @@ terminate_existing_connections() {
     
     echo "Terminating existing connections to blocked websites..."
     
-    # Simply kill existing connections to blocked domains
+    # Enhanced connection termination for persistent connections
+    local terminated_count=0
+    
+    # Method 1: Kill existing connections using ss (socket statistics)
     for domain in "${domains[@]}"; do
-        sudo ss -K dst "$domain" >/dev/null 2>&1 || true
+        # Kill connections by destination domain
+        if sudo ss -K dst "$domain" >/dev/null 2>&1; then
+            terminated_count=$((terminated_count + 1))
+        fi
+        
+        # Also try wildcard subdomains (for CDNs)
+        sudo ss -K dst "*.$domain" >/dev/null 2>&1 || true
     done
     
-    # Wait a moment for connections to close
-    sleep 1
+    # Method 2: Reset network connections more aggressively
+    # Flush connection tracking for blocked domains
+    for domain in "${domains[@]}"; do
+        # Remove connection tracking entries (if conntrack is available)
+        if command -v conntrack >/dev/null 2>&1; then
+            sudo conntrack -D -d "$domain" >/dev/null 2>&1 || true
+        fi
+    done
     
-    echo "Connection termination complete"
+    # Method 3: Detect and offer browser restart
+    detect_browser_connections "${domains[@]}"
+    
+    # Wait for connections to properly close
+    sleep 2
+    
+    if [[ $terminated_count -gt 0 ]]; then
+        echo "Connection termination complete ($terminated_count domains processed)"
+    else
+        echo "Connection termination complete"
+    fi
+}
+
+# Detect browsers with active connections to blocked domains
+detect_browser_connections() {
+    local domains=("$@")
+    local browsers_found=()
+    
+    # Common browser process names
+    local browser_processes=("firefox" "chrome" "chromium" "brave" "brave-browser" "opera" "edge")
+    
+    for browser in "${browser_processes[@]}"; do
+        if pgrep -f "$browser" >/dev/null 2>&1; then
+            # Check if this browser has connections to blocked domains
+            for domain in "${domains[@]}"; do
+                if sudo ss -tulpn | grep -q "$domain.*$browser" 2>/dev/null; then
+                    browsers_found+=("$browser")
+                    break
+                fi
+            done
+        fi
+    done
+    
+    # Report browser connection status (informational only)
+    if [[ ${#browsers_found[@]} -gt 0 ]]; then
+        echo "ℹ️  Active browser connections detected: ${browsers_found[*]}"
+        echo "   Blocking will take effect for new requests and connections"
+    fi
 }
 
 # Aggressively flush DNS caches
@@ -246,6 +298,62 @@ is_dot_blocking_enabled() {
     fi
 }
 
+# Close streaming tabs using gentle window management
+close_streaming_tabs() {
+    echo "Closing streaming tabs..."
+    
+    # Check if xdotool is available
+    if ! command -v xdotool >/dev/null 2>&1; then
+        echo "⚠️  xdotool not found - tab closing unavailable"
+        echo "   Install with: sudo apt install xdotool"
+        return 1
+    fi
+    
+    # Get tab closing configuration
+    local websites=($(config_get_tab_closing_websites))
+    local delay=$(config_get_tab_closing_delay)
+    local closed_count=0
+    local total_found=0
+    
+    echo "Searching for streaming tabs: ${websites[*]}"
+    
+    for website in "${websites[@]}"; do
+        # Find windows matching this website
+        local window_ids=$(xdotool search --onlyvisible --name "$website" 2>/dev/null)
+        
+        if [[ -n "$window_ids" ]]; then
+            while IFS= read -r window_id; do
+                if [[ -n "$window_id" ]]; then
+                    total_found=$((total_found + 1))
+                    local window_name=$(xdotool getwindowname "$window_id" 2>/dev/null)
+                    echo "Found streaming tab: $window_name"
+                    
+                    # Gently close the tab using windowactivate + ctrl+w
+                    if xdotool windowactivate "$window_id" 2>/dev/null; then
+                        sleep "$delay"  # Wait for window to activate
+                        xdotool key ctrl+w  # Close only the current tab
+                        closed_count=$((closed_count + 1))
+                        echo "Closed tab: $window_name"
+                        
+                        # Delay between closing tabs
+                        sleep "$delay"
+                    else
+                        echo "⚠️  Could not activate window: $window_name"
+                    fi
+                fi
+            done <<< "$window_ids"
+        fi
+    done
+    
+    if [[ $total_found -eq 0 ]]; then
+        echo "No streaming tabs found to close"
+    else
+        echo "Closed $closed_count of $total_found streaming tabs"
+    fi
+    
+    return 0
+}
+
 # Block websites using hosts file with improved reliability
 block_websites() {
     local temp_file=$(mktemp)
@@ -286,6 +394,7 @@ block_websites() {
     local hosts_enabled=$(config_get_hosts_blocking_enabled)
     local dot_enabled=$(config_get_dot_blocking_enabled)
     local doh_string_enabled=$(config_get_doh_string_blocking_enabled)
+    local tab_closing_enabled=$(config_get_tab_closing_enabled)
     
     # Layer 1: Update hosts file (if enabled)
     local hosts_success=false
@@ -306,8 +415,6 @@ block_websites() {
             hosts_success=true
             # Aggressively flush DNS caches
             flush_all_dns_caches
-            # Terminate existing connections to blocked websites
-            terminate_existing_connections "${filtered_websites[@]}"
         else
             echo "Error: Failed to update hosts file"
         fi
@@ -337,6 +444,16 @@ block_websites() {
         echo "Skipping DoH string matching (disabled in config)"
     fi
     
+    # Layer 4: Tab closing (if enabled)
+    local tab_closing_success=false
+    if [[ "$tab_closing_enabled" == "true" ]]; then
+        if close_streaming_tabs; then
+            tab_closing_success=true
+        fi
+    else
+        echo "Skipping tab closing (disabled in config)"
+    fi
+    
     local blocked_count=${#filtered_websites[@]}
     local exception_count=$((${#WEBSITES[@]} - blocked_count))
     
@@ -363,6 +480,14 @@ block_websites() {
         echo "✅ Layer 3: DoH blocking enabled (prevents browser DNS bypass)"
     elif [[ "$doh_enabled" == "true" && "$doh_string_enabled" == "true" ]]; then
         echo "⚠️  Layer 3: DoH blocking failed - browsers may bypass using DNS-over-HTTPS"
+    fi
+    
+    if [[ "$tab_closing_success" == "true" ]]; then
+        echo "✅ Layer 4: Tab closing enabled (closes streaming browser tabs)"
+    elif [[ "$tab_closing_enabled" != "true" ]]; then
+        echo "ℹ️  Layer 4: Tab closing disabled (streaming tabs will remain open)"
+    else
+        echo "⚠️  Layer 4: Tab closing failed (xdotool may not be installed)"
     fi
     
     # Clean up temp file
