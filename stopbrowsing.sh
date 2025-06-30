@@ -224,7 +224,7 @@ After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=${SCRIPT_DIR}/stopbrowsing.sh block --startup
+ExecStart=${SCRIPT_DIR}/stopbrowsing.sh block -q
 RemainAfterExit=yes
 StandardOutput=journal
 StandardError=journal
